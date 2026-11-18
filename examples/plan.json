@@ -1,0 +1,17 @@
+{
+  "goal": "Add rate limiting to the public API and prove it works.",
+  "tasks": [
+    { "id": "map", "title": "Map the request path", "kind": "explore", "complexity": "S", "mode": "read",
+      "prompt": "Find where public API requests enter the app and which middleware runs. List files and line numbers." },
+    { "id": "design", "title": "Design the limiter", "kind": "design", "complexity": "M", "mode": "read", "deps": ["map"],
+      "prompt": "Propose the rate limiter: data shape, where it hooks in, limits, failure behaviour. One page." },
+    { "id": "build", "title": "Implement the limiter", "kind": "implement", "complexity": "M", "mode": "write", "deps": ["design"],
+      "prompt": "Implement the design. Keep the diff small." },
+    { "id": "tests", "title": "Test the limiter", "kind": "test", "complexity": "S", "mode": "write", "deps": ["build"],
+      "prompt": "Write behaviour tests for the limiter and run them." },
+    { "id": "docs", "title": "Document the limits", "kind": "docs", "complexity": "S", "mode": "write", "deps": ["build"],
+      "prompt": "Document the limits and the 429 response in the API docs." },
+    { "id": "review", "title": "Review the change", "kind": "review", "complexity": "M", "mode": "read", "deps": ["build", "tests"],
+      "prompt": "Review the diff for bugs. Report only problems you can demonstrate." }
+  ]
+}
