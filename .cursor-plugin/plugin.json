@@ -1,6 +1,0 @@
-{
-  "name": "orch",
-  "version": "0.1.0",
-  "description": "Route tasks across your installed coding agents by cost, speed and quality.",
-  "skills": "./skills/"
-}

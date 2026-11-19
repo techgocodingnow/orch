@@ -86,11 +86,16 @@ test('only available agents are used', () => {
   assert.throws(() => route(plan, { ...base, agents: [] }), /No usable agent/);
 });
 
+test('with nothing set, routing is best quality', () => {
+  assert.deepEqual(route(plan, base), route(plan, { ...base, profile: 'quality' }));
+  assert.ok(route(plan, base).totalUsd > route(plan, { ...base, profile: 'balanced' }).totalUsd);
+});
+
 test('review prefers a different vendor than the author', () => {
   const p = structuredClone(plan);
   p.tasks.find((t) => t.id === 'build').agent = 'claude';
   p.tasks.find((t) => t.id === 'tests').agent = 'claude';
-  assert.equal(pick(route(p, base), 'review').agent, 'codex');
+  assert.equal(pick(route(p, { ...base, profile: 'balanced' }), 'review').agent, 'codex');
 });
 
 test('escalate moves to a strictly better model, or null at the top', () => {

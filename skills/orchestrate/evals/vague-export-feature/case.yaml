@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: vague-export-feature
+expected_outcome: |
+  The request leaves real decisions open (which format, where the output goes, which notes). The agent does not guess them silently. It puts the open decisions to the user as numbered questions, each with a recommended answer, and does not start building.
+context:
+  scaffold_script: place-files.sh

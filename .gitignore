@@ -1,2 +1,4 @@
 .orch/
 node_modules/
+resources/
+.workspace/

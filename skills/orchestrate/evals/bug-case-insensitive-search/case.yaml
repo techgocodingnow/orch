@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: bug-case-insensitive-search
+expected_outcome: |
+  The bug is reproduced before any plan is written. A requirements file records the goal, what was verified, acceptance criteria and what is out of scope. plan.json is valid, its first task turns the reproduction into a failing test and the fix depends on it, and each acceptance criterion has a check with a kind, a confidence rating and, for the new behaviour, a proveOn file. orch route accepts the plan.
+context:
+  scaffold_script: place-files.sh

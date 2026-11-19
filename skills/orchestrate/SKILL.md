@@ -1,103 +1,76 @@
 ---
 name: orchestrate
-description: Split a task into parts, pick the best installed skill and the cheapest capable model for each part, and run them across the installed coding agents (Claude Code, Codex, Cursor) within an optional dollar budget. Use when the user types /orchestrate or asks to orchestrate a task across agents or models.
+description: Take a task from a Jira ticket or a plain description to a pull request that is ready to merge. Runs six gated stages (requirements, design, breakdown, development, automated testing, review and acceptance) and loops plan > implement > review > fix until the gate passes or a person is needed. Each task runs in its own sub-session on the model that fits it, across Claude Code and Codex. Use when the user types /orchestrate, hands over a ticket key or URL to be built, or asks to take a task through to a PR.
 ---
 
 # Orchestrate
 
-You are the orchestrator. You plan, the `orch` CLI routes and runs, and you verify and report. The CLI behaves the same in every agent, so follow these steps whichever agent you are.
+You are the orchestrator. You own the outcome: the ticket's intent, the plan, and the judgement calls. The `orch` CLI does the mechanical parts (routing tasks to models, running sub-sessions, running checks, reading PR feedback, publishing the gate), so that what it enforces holds even when a worker would rather it did not.
 
-Usage: `/orchestrate [--budget <usd>] [--profile cheap|balanced|fast|quality] [--agents a,b] <task>`
+Usage: `/orchestrate <JIRA-KEY | Jira URL | task in words> [--budget <usd>] [--profile cheap|balanced|fast] [--approve human|observe|auto] [--no-pr] [--no-alert]`. In Codex the user types `$orchestrate`. Every flag is optional; pass one to `orch` only when the user gave it.
 
-If `orch` is not on PATH, tell the user to run `node <repo>/src/cli.mjs install` and stop.
+## Before anything
 
-## 1. Read the request
+Run `orch setup --check`. On a non-zero exit, follow the `orch-setup` skill, then return here.
 
-Pull out the task and any flags. No profile means `balanced`. No budget means no cap. Restate the goal in one sentence.
+## Size the task
 
-A task that is one small step needs no orchestration. Do it yourself and say so.
+The six stages exist to stop expensive mistakes. A small task has no room for them, so size it before you start:
 
-## 2. Look at what is available
+| size | what it looks like | what you do |
+|---|---|---|
+| **trivial** | one obvious edit, no behaviour a user would notice differently, nothing to decide | Do it yourself, run the project's checks, show the diff. No plan, no stages. Say that you skipped them and why. |
+| **standard** | one ticket, fits one PR | All six stages. Stage 2 is short. |
+| **large** | several PRs, or you cannot see the whole route yet | Stages 1 and 2, then stop and propose how to split it into tickets. Each ticket then gets its own `/orchestrate`. |
 
-Run both, in parallel:
+When unsure between two sizes, take the larger one.
 
-```
-orch detect
-orch skills "<the task in the user's words>" --top 8
-```
+## The six stages
 
-`orch skills` ranks by keyword only. Read the descriptions and decide for yourself which skills fit which part of the work. Most tasks need zero or one skill. Never attach a skill because it scored well.
+Each stage has its own file with its inputs, what it must produce, and the condition that ends it. Read a stage's file when you reach that stage, and work only that stage: the next file will still be there, and reading ahead pulls attention off the stage in front of you.
 
-## 3. Write the plan
+| # | stage | file | produces | ends when |
+|---|---|---|---|---|
+| 1 | Requirements | `stages/1-requirements.md` | `.orch/requirements.md` | every acceptance criterion is one a reviewer could judge true or false, and the user has answered every open decision |
+| 2 | Design | `stages/2-design.md` | `.orch/design.md` | every hard-to-reverse decision is settled by the user, and the seams to test at are named |
+| 3 | Breakdown | `stages/3-breakdown.md` | `.orch/plan.json` | every requirement traces to a task and a check, and `orch route` says START |
+| 4 | Development | `stages/4-development.md` | commits on a feature branch | every task is `done` with its own check passing |
+| 5 | Automated testing | `stages/5-testing.md` | `.orch/verification.md` | `orch verify` gives a verdict other than FAIL on a clean commit |
+| 6 | Review and acceptance | `stages/6-review.md` | a PR with the gate published | the gate is `success`, or a person has been handed a decision-ready brief |
 
-Explore the code only as much as you need to split the work well. Then write `.orch/plan.json`:
+Keep a todo list with one item per stage and tick each as its end condition is met.
 
-```json
-{
-  "goal": "one sentence, the outcome the user wants",
-  "tasks": [
-    {
-      "id": "find-callers",
-      "title": "Find every caller of the sync store",
-      "kind": "explore",
-      "complexity": "S",
-      "mode": "read",
-      "prompt": "Self-contained brief. The worker sees only this, the goal, and the reports of its deps.",
-      "deps": []
-    }
-  ]
-}
-```
+## The loop
 
-Fields per task:
-
-| field | values |
-|---|---|
-| `kind` | `mechanical` `explore` `docs` `test` `implement` `debug` `review` `design`. Sets the quality the model must reach. |
-| `complexity` | `S` a few files and minutes, `M` a real unit of work, `L` wide or subtle. Sets the cost estimate and nudges quality. |
-| `mode` | `read` or `write`. Read tasks run in parallel. Write tasks take turns unless isolated. |
-| `deps` | ids whose reports this task needs. They are pasted into its prompt. |
-| `skill` | optional, the name of one installed skill from step 2. The worker is told to read and follow it. |
-| `isolation` | optional `"worktree"`. The task gets its own git worktree and branch so write tasks can run in parallel. You merge the branches afterward. |
-| `model`, `agent`, `maxCost` | optional pins. Set them only when the user asked: `"model": "claude/opus@high"`, `"agent": "codex"`, `"maxCost": 0.5`. |
-
-How to split:
-
-- One task per unit that ends in something checkable. Three to seven tasks is typical. More tasks cost more.
-- Be honest about `kind` and `complexity`. Inflating them wastes money and deflating them buys bad work.
-- Parallel write tasks must touch different files. If you cannot guarantee that, chain them with `deps` or isolate them.
-- End a code change with a `review` task that depends on the write tasks. The router prefers a different vendor for it than the author.
-- Write each prompt for a reader with no context: the goal, the files, the constraints, how to check the result.
-
-## 4. Route and show the user
+Stages 4, 5 and 6 are one loop, not a line:
 
 ```
-orch route .orch/plan.json [--profile <p>] [--budget <usd>] [--agents a,b]
+plan ──> implement ──> test ──> review ──┐
+            ^                            │ findings
+            └────── rework ──────────────┘
 ```
 
-Show the table: task, model, estimated cost, total. Then:
+A review finding or a failed check sends the work back to implementation as a **rework** round, which fixes exactly what was named and nothing else, then goes through testing and review again. The loop ends in one of two ways: the gate passes, or three rework rounds have run. After three, stop and hand the open items to the user: a fourth attempt by the same process is unlikely to succeed where three failed, and a person looking is worth more than another round.
 
-- Estimate within budget, or no budget set: go on to step 5 without asking.
-- `OVER BUDGET`: do not run. Give the user the options with numbers: drop or shrink tasks, pass `--relax` (some tasks fall below their quality floor), or raise the budget. Wait for their choice.
+A finding that shows the requirements or the design were wrong goes back further, to stage 1 or 2, and to the user. Reworking code against a wrong requirement only produces a better-built wrong thing.
 
-Estimates are rough. Prices marked `~` are placeholders.
+## Guard your context
 
-## 5. Run
+You run for the whole ticket; your context is the one resource that cannot be topped up. Reasoning gets worse as it fills, long before it is full.
 
-```
-orch run .orch/plan.json [same flags]
-```
+- **Keep the state on disk, not in your head.** `.orch/requirements.md`, `.orch/design.md`, `.orch/plan.json`, `.orch/verification.md` and the run folder are the record. Anything you would need after a context reset belongs in one of them. That is also what makes the end of a stage a safe place to compact or hand over.
+- **Send bulk reading out.** Tracing a subsystem, reading many files, surveying logs: make it an `explore` task or a subagent and keep only its report. Read a file yourself when you need to judge it, not to find it.
+- **Read reports, not transcripts.** A worker's `.result.md` is written for you. Open its `.log` only for a task that failed, and then search it for the error; do not read it through.
+- **Pass pointers, not copies.** Tell a worker where the requirements and the design are; do not paste them into every brief. `orch run` already gives each worker a short excerpt of the reports it depends on and the path to the rest.
+- **Start fresh for a retry.** A rework or a retry goes to a new sub-session with the brief, the finding and the earlier report. A session that has already failed at something carries the wrong turn with it.
 
-This blocks until every task finishes, so give it a long timeout or run it in the background. It prints one line as each task starts and ends, then a table with the real cost. Reports land in `.orch/runs/<run>/<task>.result.md`, raw logs beside them.
+## What needs a person
 
-A failed task is retried once on a stronger model. Tasks downstream of a failure are skipped. When the budget runs out, the remaining tasks are skipped.
+Raise to the user, with your recommended answer attached, whenever the next step is a product or design call, a hard-to-reverse choice, a missing access or credential, or anything that cannot be undone. Look up facts yourself; only decisions go to the user. Work that does not depend on the answer carries on meanwhile.
 
-## 6. Verify and report
+## Where things are
 
-You own the result. Workers' reports are claims, not proof.
-
-- Read each report. For write tasks, read the diff yourself and run the project's tests.
-- Merge any `orch/<run>/<task>` worktree branches, resolving conflicts.
-- Fix small gaps yourself. For a large gap, write a follow-up plan with only the missing tasks and run it.
-
-Tell the user: what was done, the evidence it works, what failed or was skipped, and spent versus estimated cost per task.
+- `references/plan-format.md`: every field of `.orch/plan.json`, the confidence rubric, and the check kinds. Stage 3 sends you there.
+- `references/review.md`: the three review briefs and how to judge what comes back. Stage 6 sends you there.
+- `worker.md`: the rules every sub-session is given. You never need to paste it; `orch run` does.
+- In Codex, `orch run` must be run with escalated permissions, because sub-sessions need the network. Exit code 3 means it was sandboxed: ask for the escalation and run it again.

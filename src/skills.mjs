@@ -3,7 +3,11 @@
 // calling agent makes the final pick from the descriptions.
 import { readdirSync, readFileSync, realpathSync, existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, dirname, basename } from 'node:path';
+import { join, dirname, basename, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Skills shipped with orch: a chosen set from pstack, copied unmodified.
+export const BUNDLED_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'vendor', 'pstack', 'skills');
 
 const STOP = new Set(
   'a an and are as at be by for from has have how i in into is it its of on or that the this to use used using user users want wants when with you your skill skills task tasks'.split(' '),
@@ -60,7 +64,7 @@ export function parseFrontmatter(text) {
   return meta;
 }
 
-export function indexSkills(cwd = process.cwd()) {
+export function indexSkills(cwd = process.cwd(), bundledDir = BUNDLED_DIR) {
   const byPath = new Map();
   const add = (file, agent, scope) => {
     let real;
@@ -89,7 +93,24 @@ export function indexSkills(cwd = process.cwd()) {
   // Claude Code plugins keep their skills under the plugin cache.
   const plugins = join(homedir(), '.claude', 'plugins', 'cache');
   for (const file of findSkillFiles(plugins, 6)) add(file, 'claude', 'plugin');
-  return [...byPath.values()].sort((a, b) => a.name.localeCompare(b.name));
+  // Bundled skills come last and never shadow one the user installed.
+  const installed = new Set([...byPath.values()].map((s) => s.name));
+  for (const file of findSkillFiles(bundledDir, 1)) {
+    const before = byPath.size;
+    add(file, 'bundled', 'bundled');
+    if (byPath.size === before) continue;
+    const skill = byPath.get(realpathSync(file));
+    skill.bundled = true;
+    skill.shadowed = installed.has(skill.name);
+  }
+  return [...byPath.values()].sort((a, b) => a.name.localeCompare(b.name) || Number(Boolean(a.bundled)) - Number(Boolean(b.bundled)));
+}
+
+// A plan names a skill as "tdd", or "pstack:tdd" to force the bundled copy.
+export function findSkill(skills, name) {
+  if (!name) return null;
+  if (name.startsWith('pstack:')) return skills.find((s) => s.bundled && s.name === name.slice(7)) ?? null;
+  return skills.find((s) => s.name === name && !s.bundled) ?? skills.find((s) => s.name === name) ?? null;
 }
 
 export function tokenize(text) {

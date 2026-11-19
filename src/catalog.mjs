@@ -64,12 +64,23 @@ export const PROFILES = {
 };
 
 export const DEFAULT_CONFIG = {
-  profile: 'balanced',
+  // No spending level set means best quality. Cheaper profiles are opt-in.
+  profile: 'quality',
   budget: null,
   concurrency: 4,
   timeoutMinutes: 30,
   escalate: true,
-  agents: {},
+  // Cursor's adapter has never been run against a real account, so it is opt-in.
+  agents: { cursor: { enabled: false } },
+  // Task kind -> model, for kinds you always want on a specific model.
+  roles: {},
+  // Who approves a PR that passed: 'human', or 'auto' to enable GitHub auto-merge.
+  approve: 'human',
+  // Plan confidence, 0-100, needed to start a run with nobody watching.
+  minConfidence: 70,
+  // Require a verdict from a session that did not write the code before the
+  // gate can pass. Always required for auto-merge, whatever this says.
+  requireVerdict: false,
   models: [],
 };
 
@@ -98,7 +109,8 @@ export function loadConfig(cwd = process.cwd()) {
       byId.set(m.id, { ...(byId.get(m.id) ?? {}), ...m });
     }
     Object.assign(config.agents, layer.agents ?? {});
-    for (const key of ['profile', 'budget', 'concurrency', 'timeoutMinutes', 'escalate']) {
+    for (const key of ['jira', 'notify', 'roles']) if (layer[key]) config[key] = { ...(config[key] ?? {}), ...layer[key] };
+    for (const key of ['profile', 'budget', 'concurrency', 'timeoutMinutes', 'escalate', 'approve', 'minConfidence', 'requireVerdict']) {
       if (layer[key] !== undefined) config[key] = layer[key];
     }
   }

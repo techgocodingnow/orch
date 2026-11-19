@@ -1,17 +1,103 @@
 {
   "goal": "Add rate limiting to the public API and prove it works.",
+  "confidence": {
+    "understanding": 85,
+    "why": "The ticket states the limit and the response code. It does not say whether the limit is per user or per IP.",
+    "assumptions": [
+      "The limit is per authenticated user, falling back to IP for anonymous requests."
+    ]
+  },
+  "verify": "npm test",
+  "acceptance": [
+    {
+      "id": "limit-429",
+      "criterion": "The 101st request in a minute from one client gets a 429",
+      "check": "npm test -- limiter",
+      "kind": "e2e",
+      "proveOn": [
+        "test/limiter.test.js"
+      ],
+      "confidence": 90,
+      "why": "The test sends 101 real requests through the HTTP handler."
+    },
+    {
+      "id": "docs",
+      "criterion": "The API docs state the limit and the 429 response",
+      "check": "grep -q '429' docs/api.md",
+      "kind": "static",
+      "confidence": 60,
+      "why": "A grep for 429 shows the docs mention it, not that they are right."
+    },
+    {
+      "id": "copy",
+      "criterion": "The 429 message reads well to a customer",
+      "manual": "Read the error message in the limiter."
+    }
+  ],
   "tasks": [
-    { "id": "map", "title": "Map the request path", "kind": "explore", "complexity": "S", "mode": "read",
-      "prompt": "Find where public API requests enter the app and which middleware runs. List files and line numbers." },
-    { "id": "design", "title": "Design the limiter", "kind": "design", "complexity": "M", "mode": "read", "deps": ["map"],
-      "prompt": "Propose the rate limiter: data shape, where it hooks in, limits, failure behaviour. One page." },
-    { "id": "build", "title": "Implement the limiter", "kind": "implement", "complexity": "M", "mode": "write", "deps": ["design"],
-      "prompt": "Implement the design. Keep the diff small." },
-    { "id": "tests", "title": "Test the limiter", "kind": "test", "complexity": "S", "mode": "write", "deps": ["build"],
-      "prompt": "Write behaviour tests for the limiter and run them." },
-    { "id": "docs", "title": "Document the limits", "kind": "docs", "complexity": "S", "mode": "write", "deps": ["build"],
-      "prompt": "Document the limits and the 429 response in the API docs." },
-    { "id": "review", "title": "Review the change", "kind": "review", "complexity": "M", "mode": "read", "deps": ["build", "tests"],
-      "prompt": "Review the diff for bugs. Report only problems you can demonstrate." }
+    {
+      "id": "map",
+      "title": "Map the request path",
+      "kind": "explore",
+      "complexity": "S",
+      "mode": "read",
+      "prompt": "Find where public API requests enter the app and which middleware runs. List files and line numbers."
+    },
+    {
+      "id": "design",
+      "title": "Design the limiter",
+      "kind": "design",
+      "complexity": "M",
+      "mode": "read",
+      "deps": [
+        "map"
+      ],
+      "prompt": "Propose the rate limiter: data shape, where it hooks in, limits, failure behaviour. One page."
+    },
+    {
+      "id": "build",
+      "title": "Implement the limiter",
+      "kind": "implement",
+      "complexity": "M",
+      "mode": "write",
+      "deps": [
+        "design"
+      ],
+      "prompt": "Implement the design. Keep the diff small."
+    },
+    {
+      "id": "tests",
+      "title": "Test the limiter",
+      "kind": "test",
+      "complexity": "S",
+      "mode": "write",
+      "deps": [
+        "build"
+      ],
+      "prompt": "Write behaviour tests for the limiter and run them."
+    },
+    {
+      "id": "docs",
+      "title": "Document the limits",
+      "kind": "docs",
+      "complexity": "S",
+      "mode": "write",
+      "deps": [
+        "build"
+      ],
+      "prompt": "Document the limits and the 429 response in the API docs."
+    },
+    {
+      "id": "review",
+      "title": "Review the change",
+      "kind": "review",
+      "complexity": "M",
+      "mode": "read",
+      "deps": [
+        "build",
+        "tests"
+      ],
+      "prompt": "Review the diff for bugs. Report only problems you can demonstrate."
+    }
   ]
 }

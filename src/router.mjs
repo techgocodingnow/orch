@@ -1,5 +1,6 @@
 // Routing: pick an agent, model and effort for every task in a plan, then fit
 // the plan to a budget. Pure functions, no I/O.
+import { validateAcceptance } from './verify.mjs';
 import { EFFORTS, SIZES, OVERHEAD_TOKENS, KIND_FLOORS, COMPLEXITY_SHIFT, MAX_FLOOR, PROFILES } from './catalog.mjs';
 
 const MODES = ['read', 'write'];
@@ -15,6 +16,9 @@ export function validatePlan(plan) {
     if (!t.id || !/^[a-zA-Z0-9_-]+$/.test(t.id)) errors.push(`${at}: id must match [a-zA-Z0-9_-]+`);
     if (ids.has(t.id)) errors.push(`${at}: duplicate id`);
     ids.add(t.id);
+    if (t.needsHuman != null && typeof t.needsHuman !== 'string') errors.push(`${at}: needsHuman must be a sentence saying what a person has to decide`);
+    if (t.verify != null && typeof t.verify !== 'string') errors.push(`${at}: verify must be a shell command`);
+    if (t.needsHuman) continue; // a human task needs no kind, size or mode
     if (!t.prompt) errors.push(`${at}: prompt is required`);
     if (!(t.kind in KIND_FLOORS)) errors.push(`${at}: kind must be one of ${Object.keys(KIND_FLOORS).join(', ')}`);
     if (!(t.complexity in SIZES)) errors.push(`${at}: complexity must be S, M or L`);
@@ -24,6 +28,9 @@ export function validatePlan(plan) {
     for (const d of t.deps ?? []) if (!ids.has(d)) errors.push(`${t.id}: unknown dep "${d}"`);
   }
   if (errors.length === 0 && !topoOrder(plan.tasks)) errors.push('tasks have a dependency cycle');
+  errors.push(...validateAcceptance(plan.acceptance));
+  const u = plan.confidence?.understanding;
+  if (u != null && !(typeof u === 'number' && u >= 0 && u <= 100)) errors.push('confidence.understanding must be a number from 0 to 100');
   return errors;
 }
 
@@ -92,14 +99,15 @@ function utility(cand, task, floor, pool, profile, avoidAgents) {
   return profile.q * headroom - profile.cost * cost + profile.speed * (cand.speed / 10) + diversity;
 }
 
-function pinnedPool(task, all, notes) {
+function pinnedPool(task, all, notes, roles) {
   let pool = all;
-  if (task.model) {
-    const exact = all.filter((c) => c.id === task.model);
-    const byModel = all.filter((c) => c.modelId === task.model);
+  const pin = task.model ?? roles?.[task.kind];
+  if (pin) {
+    const exact = all.filter((c) => c.id === pin);
+    const byModel = all.filter((c) => c.modelId === pin);
     pool = exact.length ? exact : byModel;
     if (!pool.length) {
-      notes.push(`${task.id}: pinned model "${task.model}" is not available, routing normally`);
+      notes.push(`${task.id}: pinned model "${pin}" is not available, routing normally`);
       pool = all;
     }
   }
@@ -129,7 +137,7 @@ function eligible(task, pool, floor, notes) {
   return ok;
 }
 
-export function route(plan, { models, agents, profile = 'balanced', budget = null, relax = false }) {
+export function route(plan, { models, agents, profile = 'quality', budget = null, relax = false, roles = {} }) {
   if (!(profile in PROFILES)) throw new Error(`Unknown profile "${profile}". Use ${Object.keys(PROFILES).join(', ')}`);
   const all = candidates(models, agents);
   if (!all.length) throw new Error('No usable agent. Run `orch detect` to see why.');
@@ -138,14 +146,16 @@ export function route(plan, { models, agents, profile = 'balanced', budget = nul
   const picks = new Map();
 
   for (const task of topoOrder(plan.tasks)) {
+    if (task.needsHuman) continue; // no model does this one
     const floor = floorFor(task, profile);
-    const pool = pinnedPool(task, all, notes);
+    const pool = pinnedPool(task, all, notes, roles);
+    const hasPin = Boolean(task.model ?? roles[task.kind]);
     const pinned = pool !== all;
-    const ok = pinned && task.model ? pool : eligible(task, pool, floor, notes);
+    const ok = pinned && hasPin ? pool : eligible(task, pool, floor, notes);
     const avoid = new Set((task.deps ?? []).map((d) => picks.get(d)?.cand.agent).filter(Boolean));
     const score = (c) => utility(c, task, floor, ok, weights, avoid);
     const cand = ok.reduce((a, b) => (score(b) > score(a) ? b : a));
-    picks.set(task.id, { task, cand, floor, pool, pinned: pinned && Boolean(task.model), score });
+    picks.set(task.id, { task, cand, floor, pool, pinned: pinned && hasPin, score });
   }
 
   const total = () => [...picks.values()].reduce((sum, p) => sum + estimateUsd(p.task, p.cand), 0);
@@ -176,6 +186,7 @@ export function route(plan, { models, agents, profile = 'balanced', budget = nul
   }
 
   const tasks = plan.tasks.map((task) => {
+    if (task.needsHuman) return { id: task.id, title: task.title ?? task.id, needsHuman: task.needsHuman, assignment: null };
     const { cand, floor } = picks.get(task.id);
     return {
       id: task.id,
@@ -187,7 +198,7 @@ export function route(plan, { models, agents, profile = 'balanced', budget = nul
     };
   });
   const totalUsd = round(total());
-  if (tasks.some((t) => t.assignment.priceEstimated)) {
+  if (tasks.some((t) => t.assignment?.priceEstimated)) {
     notes.push('Some prices are placeholders (marked ~). Set real rates in ~/.config/orch/config.json.');
   }
   return {

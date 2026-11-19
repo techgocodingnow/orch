@@ -5,6 +5,9 @@ import { createWriteStream, readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+// Workers build and commit. Publishing and history rewrites stay with the
+// orchestrator and the human, so a worker cannot reach them at all.
+export const WORKER_DENIED = 'Bash(git push:*) Bash(git reset --hard:*) Bash(git clean:*) Bash(git branch -D:*) Bash(git checkout .:*) Bash(git restore .:*) Bash(gh pr merge:*) Bash(gh pr create:*)';
 const READ_TOOLS = 'Read Grep Glob WebSearch WebFetch Bash(git log:*) Bash(git diff:*) Bash(git show:*) Bash(git status:*) Bash(ls:*) Bash(rg:*) Bash(cat:*)';
 
 function exec(cmd, args, { timeoutMs = 10_000, input } = {}) {
@@ -43,7 +46,7 @@ export const ADAPTERS = {
       if (model) args.push('--model', model);
       if (effort) args.push('--effort', effort);
       if (maxUsd != null) args.push('--max-budget-usd', String(maxUsd));
-      if (mode === 'write') args.push('--permission-mode', 'acceptEdits', '--allowedTools', `${READ_TOOLS} Edit Write Bash`);
+      if (mode === 'write') args.push('--permission-mode', 'acceptEdits', '--allowedTools', `${READ_TOOLS} Edit Write Bash`, '--disallowedTools', WORKER_DENIED);
       else args.push('--permission-mode', 'dontAsk', '--allowedTools', READ_TOOLS);
       return { args, stdin: true };
     },
@@ -146,7 +149,7 @@ export const ADAPTERS = {
 
 export async function detect(config = { agents: {} }) {
   const checks = Object.entries(ADAPTERS).map(async ([name, adapter]) => {
-    if (config.agents?.[name]?.enabled === false) return { name, available: false, reason: 'disabled in config' };
+    if (config.agents?.[name]?.enabled === false) return { name, available: false, reason: 'off (enable in config)' };
     const which = await exec('/bin/sh', ['-c', `command -v ${adapter.bin}`]);
     if (which.code !== 0) return { name, available: false, reason: 'not installed' };
     const [version, auth] = await Promise.all([exec(adapter.bin, ['--version']), adapter.auth()]);
@@ -158,7 +161,7 @@ export async function detect(config = { agents: {} }) {
       models: auth.models,
       fallbackModel: auth.fallbackModel,
       path: which.out.trim(),
-      version: version.out.trim().split('\n')[0],
+      version: version.out.split('\n').find((l) => /\d+\.\d+/.test(l) && !/warning/i.test(l))?.trim() ?? '',
     };
   });
   return Promise.all(checks);

@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: trivial-help-typo
+expected_outcome: |
+  The agent recognises a one-line change with nothing to decide, fixes the typo directly, runs the project's tests, and says it skipped the planning stages. It does not write a plan file or start sub-sessions.
+context:
+  scaffold_script: place-files.sh
